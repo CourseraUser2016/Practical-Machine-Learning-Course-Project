@@ -1,0 +1,162 @@
+---
+title: "Practical Machine Learning"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, comment = "")
+```
+  
+## Background 
+  Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here (see the section on the Weight Lifting Exercise Dataset).
+  
+## Executive Summary
+  
+To predict the manner in which users of activity trackers did their exercise, we have compared the prediction accuracy of both random forests and decision trees. We have found that by dropping variables that had more than 60% NA's or low variance, that random forests were able to predict the "classe" variable with 99.18% accuracy on the test data and decision trees were able to predict with 74.23% accuracy.
+
+  
+## Setting the environment  
+  
+```{r packages}
+#this function will install packages if they don't exist on a system
+packages<-function(x){
+  x<-as.character(match.call()[[2]])
+  if (!require(x,character.only=TRUE)){
+    install.packages(pkgs=x,
+                     repos="http://cran.r-project.org",
+                     dependencies = TRUE)
+    require(x,character.only=TRUE)
+  }
+}
+
+packages(caret)
+packages(randomForest)
+packages(rpart)
+packages(rpart.plot)
+packages(RColorBrewer)
+packages(rattle)
+
+#set working directory
+
+if(!dir.exists("./data")){
+    dir.create("./data")
+}
+
+setwd("./data")
+#download files
+if(!file.exists("pml-training.csv")){
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+}
+
+if(!file.exists("pml-testing.csv")){
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+}
+
+#Read training data and replace missing/error values
+train_data <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+
+#Read estnd replace missing/error values
+test_data <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+
+#Take a look at the data
+str(train_data)
+```
+  
+  We can see that the first seven variables of the data are made up of metadata not relevant to the model and there are near 0 variance variables. We will remove this in a later step.
+  
+## Partitioning data for Cross-Validation
+  
+```{r partitioning}
+#partition data for cross validation
+inTrain <- createDataPartition(y=train_data$classe, p = 0.60, list=FALSE)
+training <- train_data[inTrain,]
+testing <- train_data[-inTrain,]
+
+dim(training); dim(testing)
+```
+  
+## Data Processing
+  
+```{r dataprocessing}
+
+training <- training[,-c(1:7)]
+
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+training <- training[, nzv$nzv==FALSE]
+
+training_clean <- training
+for(i in 1:length(training)) {
+  if( sum( is.na( training[, i] ) ) /nrow(training) >= .6) {
+    for(j in 1:length(training_clean)) {
+      if( length( grep(names(training[i]), names(training_clean)[j]) ) == 1)  {
+        training_clean <- training_clean[ , -j]
+      }   
+    } 
+  }
+}
+
+# Set the new cleaned up dataset back to the old dataset name
+training <- training_clean
+
+# Get the column names in the training dataset
+columns <- colnames(training)
+
+# Subset the test data on the variables that are in the training data set and remove the class variable
+test_data <- test_data[colnames(training[, -53])]
+dim(test_data)
+```
+  
+##Cross-Validation: Prediction with Random Forest
+  A random forest is run on the training set and the results of the test data are evaluated 
+```{r randomforest}
+set.seed(54321)
+modFit <- randomForest(classe ~ ., data=training)
+prediction <- predict(modFit, testing)
+cm <- confusionMatrix(prediction, testing$classe)
+print(cm)
+```
+
+```{r}
+overall.accuracy <- round(cm$overall['Accuracy'] * 100, 2)
+sam.err <- round(1 - cm$overall['Accuracy'],2)
+sam.err
+```
+  
+We see that the model is 99.18% accurate on a subset of the *training* data with an expected out of sample error rate of approximately 0.01%.  
+```{r}
+plot(modFit)
+```
+  
+As can be seen, the random forest is converging to a solution with an error rate of less than 0.025 for all 5 classe.
+  
+## Cross-Validation: Prediction with a Decision Tree
+```{r decision tree}
+set.seed(54321)
+modFit2 <- rpart(classe ~ ., data=training, method="class")
+prediction2 <- predict(modFit2, testing, type="class")
+cm2 <- confusionMatrix(prediction2, testing$classe)
+print(cm2)
+overall.accuracy2 <- round(cm2$overall['Accuracy'] * 100, 2)
+sam.err2 <- round(1 - cm2$overall['Accuracy'],2)
+sam.err2
+```
+  
+  The model is 74.23% accurate on the testing data partitioned from the training data. The expected out of sample error is roughly 0.26%.
+
+  
+```{r}
+fancyRpartPlot(modFit2)
+```
+
+## Prediction on the data 
+  The Random Forest model gave an accuracy of 99.18%, which is much higher than the 74.23% accuracy from the Decision Tree. So we will use the Random Forest model to make the predictions on the test data to predict the way 20 participates performed the exercise.  
+```{r prediction}
+final_prediction <- predict(modFit, test_data, type="class")
+print(final_prediction)
+```
+  
+## Conclusion
+  
+  While Random Forests are much more computationally intensive, it can't be denied that they are much more reliable in their ability to predict a wide variety of variables. This is another example of why random forests are chosen over other machine learning algorithms. We have proven successfully that the behaviour of users of activity trackers can be predicted with an accuracy of 99%. 
